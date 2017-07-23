@@ -25,27 +25,77 @@ the administration or enforcement of this part by TTB order 1135.5."))
    (uses :accessor uses :initform 0 :initarg :uses)
    (max-uses :accessor max-uses :initarg :max-uses))
   (:documentation "The parent class of all containers."))
+
+(defgeneric new-p (object)
+  (:documentation "Returns T while the object has zero uses.")
+  (:method ((object container))
+    (when (= 0 (uses object)) t)))
+
+(defgeneric remaining-uses (object)
+  (:documentation
+   "Returns the number of uses remaining or T if unlimited uses are allowed.")
+  (:method :around ((object container))
+	   (if (slot-boundp object 'max-uses)
+	       (call-next-method)
+	       ;; If we don't have a max-uses then we have unlimited uses.
+	       t))
+  (:method ((object container))
+    (let ((uses-left (- (max-uses object) (uses object))))
+      (when (< 0 uses-left)
+	uses-left))))
+
+;; Might be room for a macro here to reduce repetition of code.
+(defgeneric percent-used (object)
+  (:documentation
+   "Returns the percentage of usage an object has received.  Results are as a UNIT of percent.")
+  (:method :around ((object container))
+	   (if (slot-boundp object 'max-uses)
+	       (call-next-method)
+	       t))
+  (:method ((object container))
+    (with-accessors ((max-uses max-uses)
+		     (uses uses))
+	object
+      (reduce-unit `(,(* (/ uses max-uses) 100) percent)))))
+
+;; We start with physics ;)  This definition goes deep.. maybe this definition is better
+;; suited for the top level etoh.cfr27.lisp file...
+(defclass material ()
+  ((name :accessor name :initarg :name)))
+(defclass color ()
+  ((value :accessor value :initarg :value))
+  (:documentation
+   "The parent class of all colors."))
+(defclass lovibond (color)
+  ()
+  (:documentation
+   "A color measurement used here primarily to measure wort color.. represent as a unit?"))
+(defclass srm (color)
+  ()
+  (:documentation
+   "A color standard.  Need flushing out of this.. represent as a unit?"))
+
+;;; Oak material (use in containers and as a treament).
+(defclass oak (material)
+  () ; TODO go into grain, toast, surface area, 
+  (:default-initargs :name "oak"))
+
 (defclass bottle (container)
   ()
   (:documentation
    "Any container, irrespective of the material from which made, used
-for the sale of distilled spirits at retail."))
+for the sale of distilled spirits at retail.")
+  (:default-initargs :max-uses 1) #| I assume this is true based on 
+  old rules about bottle reuse being a crime.  TODO verify this is true. |#)
 (defclass oak-container (container)
   ((toast-level :accessor toast-level :initarg :toast-level))
-  (:default-initargs :material :oak))
+  (:default-initargs :material (make-instance 'oak)))
 (defclass charred-oak-container (oak-container)
   ()
   (:default-initargs :toast-level :charred))
-(defclass charred-new-oak-container (charred-oak-container)
-  ()
-  (:default-initargs :max-uses 1))
-
-(defclass material ()
-  ((name :accessor name :initarg :name)))
 (defclass charcoal (material)
   ()
   (:default-initargs :name "charcoal"))
-
 (defclass grain (material)
   ()
   (:default-initargs :name "grain"))
@@ -62,11 +112,19 @@ for the sale of distilled spirits at retail."))
   ()
   (:default-initargs :name "wheat"))
 (defclass malt (treatment)
-  ()
+  ;; TODO flush out these classes... ASBC I think will be the standard here.
+  ((flavor :accessor flavor :initarg :flavor)
+   (aroma :accessor aroma :initarg :aroma)
+   (fan :accessor fan :initarg :fan
+	:documentation "Free Amino Acid Nitrogen.")
+   (diastatic-power :accessor dp :initarg :diastatic-power)
+   (kolbach-index :accessor kolbach-index :initarg :kolbach-index)
+   (color :accessor color :initarg :color))
   (:default-initargs :name "malted grain"))
 (defclass malted-barley (malt barley)
   ()
-  (:default-initargs :name "malted barley"))
+  (:default-initargs :name "malted barley"
+    :material (make-instance 'barley)))
 (defclass malted-rye (malt rye)
   ()
   (:default-initargs :name "malted rye"))
@@ -146,13 +204,28 @@ who is a wholesale or retailer."))
 ;; Produced at, means the composite proof of the spirits after
 ;; completion of distillation and before reduction in proof.
 
-(unit-formulas::defformula proof-gallon-unit
+(unit-formulas::defformulae* convert-to-proof-gallons
     ((volume gallons)
      (proof proof)
      (comp-proof proof 100))
   (/ (* volume proof) comp-proof))
-;; (proof-gallon-unit '(volume 1 gallon) '(proof 50 percent)) -> #<UNIT>
-;; (convert-unit #<UNIT> 'gallons) => 1.0d0
+(unit-formulas::defformulae* convert-from-proof-gallons
+    ((proof-gallons gallons)
+     (proof proof)
+     (comp-proof proof 100))
+  (* (/ proof-gallons proof) comp-proof))
+
+(unit-formulas::define-units (proof-gallon proof-gallons pg pgs)
+    (formula :convert-to convert-to-proof-gallons
+	     :convert-from convert-from-proof-gallons))
+
+;; CFR27> (reduce-unit '((1 gallon) (100 proof) pgs))
+;; #<UNIT 0.0037854117647058826d0 m^3>
+;; CFR27> (convert-unit * 'gallons)
+;; 1.0d0
+;; CFR27> (convert-unit ** 'shot)
+;; 85.33486360957208d0
+;;; "Proof" that 1 US proof-gallon is equal to 85.3 US proof-shots
 
 ;; Season
 (defun season (timestamp)
@@ -192,43 +265,53 @@ who is a wholesale or retailer."))
   ;; I'm fooling myself and really there should not be any unbound slots.
   )
 
-(defun check-proof (production-stage fn proof &optional desc)
-  (check-ok production-stage
-	    #'(lambda (ps) (funcall fn
-				    (convert-unit (proof ps) 'proof)
-				    proof))
-	    desc))
+(defgeneric check-proof (object fn proof &optional desc)
+  (:documentation
+   "Returns true if Production-stages' proof is checked against proof using function fn.")
+  (:method ((ps production-stage) (fn function) (proof number) &optional desc)
+    (check-ok ps
+	      #'(lambda (p) (funcall fn
+				     (convert-unit (proof p) 'proof)
+				     proof))
+	      desc))
+  (:method ((ps production-stage) (fn function) (proof unit) &optional desc)
+    (check-proof ps fn (convert-unit proof 'proof) desc))
+  (:method ((stages list) (fn function) proof &optional desc)
+    (loop for stage in stages
+	 do (check-proof stage fn proof desc))))
 
-(defun check-percent (production-stage fn percent class desc)
-  (let (class-member
-	(amount-total 0))
-    (if (atom production-stage)
-	(when (typep production-stage class)
-	  (setf class-member production-stage
-		amount-total (amount production-stage)))
-	(loop for ps in production-stage
-	   summing (amount ps) into amount-total
-	   when (typep ps class)
-	   do (setf class-member ps)))
-    (if class-member
-	(check-ok class-member )
-	(fail (format nil
-		      "~A  ~A isn't a member of class: '~A'"
-		      desc
-		      production-stage
-		      class)))
-    ))
+;;   (check-percent (sources bourbon-whisky) #'> 51 'corn)
+(defgeneric check-percent (object fn percent class &optional desc)
+  (:documentation
+   "Returns true if object contains a CLASS with a PERCENT amount determined by function FN.")
+  (:method ((ps production-stage) (fn function) (percent number) (class symbol) &optional desc)
+    (check-ok (cond ((listp (material ps))
+		     (let ((amount-total 0)
+			   (class-members ()))
+		       (loop for obj in (material ps)
+			  summing (amount obj) into amount-total
+			  when (and (typep (material obj) class))
+			  do (push (material obj) class-members))
+		       (loop for member in class-members
+			  when (funcall fn (/ (amount member) amount-total) percent)
+			  return member)))
+		    ((atom ps)
+		     (when (and (funcall fn (amount (material ps)) percent)
+				(typep (material ps) class))
+		       ps))
+		    (t nil))
+	      (format nil "Checking ~A to see if it is made of ~A% ~A" ps percent class))))
 
-(defgeneric check-types (production-stage type desc)
-  (:method (ps (type symbol) desc)
+(defgeneric check-types (production-stage type &optional desc)
+  (:method (ps (type symbol) &optional desc)
     (is-type ps type) desc)
-  (:method ((ps-list list) (type symbol) desc)
+  (:method ((ps-list list) (type symbol) &optional desc)
     (loop for ps in ps-list always (check-types ps type desc)))
-  (:method ((ps production-stage) (type-list list) desc)
+  (:method ((ps production-stage) (type-list list) &optional desc)
     (loop for type in type-list always (check-types ps type desc)))
-  (:method ((ps-list list) (type-list list) desc)
+  (:method ((ps-list list) (type-list list) &optional desc)
     (loop for ps in ps-list always (check-proof ps type-list desc)))
-  (:method ((ps (eql :unbound)) fn desc)
+  (:method ((ps (eql :unbound)) fn &optional desc)
     t))
 
 ;;; Subpart C - Standards of Identity for Distilled Spirits
@@ -337,7 +420,8 @@ containers; and also includes mixtures of such whiskies of the same type."))
 
 (defmethod verify progn ((bourbon-whisky bourbon-whisky))
   (check-percent (sources bourbon-whisky) #'> 51 'corn)
-  (check-types (storages bourbon-whisky) 'charred-new-oak-container))
+  (check-types (storages bourbon-whisky) 'charred-new-oak-container
+	       "Stored in new oak container."))
 
 (defclass rye-whisky (whisky)
   ()

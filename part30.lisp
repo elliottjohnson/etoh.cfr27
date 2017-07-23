@@ -61,52 +61,74 @@
 hydrometer at temperatures between zero and 100 degrees Fahrenheit.  The
 function TRUE-PERCENT-PROOF will lazy load this value.")
 
+(defmacro lazy-load-table (table-variable filename force)
+  `(when (or ;; FORCE gives us a way to force an update.
+	     ,force
+	     ;; If we don't lazy load, we force load.
+	     (not (lazy-load-tables-p *default-site-configuration*))
+	     ;; finally if we are lazy, but don't have a value
+	     ;;  we get off the couch and LOAD IT!
+	     (not ,table-variable))
+     (setf ,table-variable
+	   (with-open-file (array
+			    (merge-pathnames ,filename
+					     (current-directory)))
+	     (read array)))))
+
+
 (defun load-30.61-table-array (&optional (force nil))
-  (when (or force (not *30.61-true-percent-proof-table*))
-    (setf *30.61-true-percent-proof-table*
-	  (with-open-file
-	      (array (merge-pathnames "part30.61.tbl1.array.lisp"
-		      (current-directory)))
-	    (read array)))
-    t))
+  (lazy-load-table *30.61-true-percent-proof-table*
+		   "part30.61.tbl1.array.lisp"
+		   force))
+
+;; dimensions is a list of max array dimensions.
+(defun multi-dimensional-array-interpolation (arg1-list arg2-list table-function datum table-null)
+  (let ((return-value table-null))
+    (destructuring-bind (arg1 arg1-floor arg1-ceiling)
+	arg1-list
+      (destructuring-bind (arg2 arg2-floor arg2-ceiling)
+	  arg2-list
+	(handler-case
+	    (if (and (= arg1 arg1-floor arg1-ceiling)
+		     (= arg2 arg2-floor arg2-ceiling))
+		(progn
+		  (setf return-value (funcall table-function arg1-floor arg2-floor)))
+		(let ((arg1-arg2-floor (funcall table-function arg1-floor arg2-floor))
+		      (arg1-ceiling (funcall table-function arg1-ceiling arg2-floor))
+		      (arg2-ceiling (funcall table-function arg1-floor arg2-ceiling)))
+		  (unless (some #'(lambda (x) (equal table-null x))
+				(list arg1-arg2-floor arg1-ceiling arg2-ceiling))
+		    (let* ((diff-arg1 (- arg1-ceiling arg1-arg2-floor))
+			   (diff-arg2 (- arg2-ceiling arg1-arg2-floor))
+			   (arg1-contribution (* diff-arg1 (- arg1 arg1-floor)))
+			   (arg2-contribution (* diff-arg2 (- arg2 arg2-floor))))
+		      (setf return-value (+ arg1-arg2-floor arg1-contribution arg2-contribution))))))
+	  (type-error ()
+	    (message "~%Invalid index reference (~A,~A), using table-null value: ~A."
+		     arg1 arg2 table-null)
+	    (setf return-value table-null)))
+	;; Do some error checking.
+	(unless (not (equal return-value table-null))
+	  (when datum
+	    (signal datum arg1-floor arg1-ceiling arg2-floor arg2-ceiling)))))
+    ;; return our found value.
+    return-value))
 
 (defun %true-percent-proof (proof temperature)
-  (let ((array-dimensions (array-dimensions *30.61-true-percent-proof-table*))
-	(proof-floor (floor proof))
-	(proof-ceiling (ceiling proof))
-	(temp-floor (floor temperature))
-	(temp-ceiling (ceiling temperature)))
-    (let ((table-value
-	   (if (and (<= proof-ceiling (first array-dimensions))
-		    (>= proof-floor 0)
-		    (<= temp-ceiling (second array-dimensions))
-		    (>= proof-floor 0))
-	       (if (and (= proof-floor proof-ceiling)
-			(= temp-floor temp-ceiling))
-		   ;; if we have integer values then we can access the table directly.
-		   (aref *30.61-true-percent-proof-table* proof-floor temp-floor)
-		   ;; if we have a decimal value then we interpolate according to §30.23.
-		   (let ((proof-temp-floor (aref *30.61-true-percent-proof-table* proof-floor temp-floor))
-			 (hydro-ceiling
-			  (aref *30.61-true-percent-proof-table* proof-ceiling temp-floor))
-			 (temp-ceiling
-			  (aref *30.61-true-percent-proof-table* proof-floor temp-ceiling)))
-		     (if (some #'(lambda (x) (= -1 x)) (list proof-temp-floor hydro-ceiling temp-ceiling))
-			 -1
-			 (let* ((diff-hydro (- hydro-ceiling proof-temp-floor))
-				(diff-temp (- temp-ceiling proof-temp-floor))
-				(hydro (* diff-hydro (- proof proof-floor)))
-				(temp (* diff-temp (- temperature temp-floor))))
-			   (+ proof-temp-floor hydro temp)))))
-	       -1)))
-      (cond ((/= table-value -1)
-	     ;; If we have a value, then return it as a unit of proof.
-	     (reduce-unit (list table-value 'proof)))
-	    (t
-	     ;; If we don't have a value, return nil with a message that might be captured.
-	     ;;   I think this is prime for signaling a condition... 
-	     (values nil
-		     (format nil "No table values for ~A proof at ~A fahrenheit" proof-floor temp-floor)))))))
+  (multi-dimensional-array-interpolation (list proof
+					       (floor proof)
+					       (ceiling proof))
+					 (list temperature
+					       (floor temperature)
+					       (ceiling temperature))
+					 #'(lambda (arg1 arg2)
+					     (aref *30.61-true-percent-proof-table* arg1 arg2))
+					 *30.61-true-percent-proof-table-error-datum*
+					 -1))
+
+(defvar *30.61-true-percent-proof-table-error-datum*
+  "No table values for ~A-~A proof at ~A-~A fahrenheit"
+  "If true and a string error datum, an error will be generated with restarts.")
 
 (defgeneric true-percent-proof (proof temperature)
   (:documentation
@@ -116,15 +138,70 @@ NIL if the values fall outside of the known ranges.")
     (unless *30.61-true-percent-proof-table*
       (load-30.61-table-array)))
   (:method ((proof unit) (temperature unit))
-    (let ((pf (convert-unit proof 'proof))
-	  (temp (convert-unit temperature 'fahrenheit)))
-      (%true-percent-proof pf temp)))
+    (let* ((pf (convert-unit proof 'proof))
+	   (temp (convert-unit temperature 'fahrenheit))
+	   (%proof (%true-percent-proof pf temp)))
+      (unless (= -1 %proof)
+	(reduce-unit (list %proof 'proof)))))  
   (:method ((proof list) temperature)
     (true-percent-proof (reduce-unit proof) temperature))
   (:method (proof (temperature list))
-    (true-percent-proof proof (reduce-unit temperature))))
+    (true-percent-proof proof (reduce-unit temperature)))
+  (:method ((proof number) temperature)
+    (true-percent-proof (list proof 'proof)
+			temperature))
+  (:method (proof (temperature number))
+    (true-percent-proof proof (list temperature 'fahrenheit))))
+
 
 ;;;; 30.62 Table 2, wine gallons and proof gallons by weight.
+
+(defvar *30.62-wine-gallons-and-proof-gallons-by-weight* nil
+  "Table 2, showing wine gallons and proof gallons by weight.")
+
+(defun load-30.62-table-assoc (&optional force)
+  (lazy-load-table *30.62-wine-gallons-and-proof-gallons-by-weight*
+		   "part30.62.tbl2.assoc.lisp"
+		   force))
+
+(defun %volume-by-weight-and-proof (weight proof)
+  (multi-dimensional-array-interpolation (list weight ;; in 0.5 increments
+					       (/ (floor (* 2 weight) 1) 2)
+					       (/ (ceiling (* 2 weight) 1) 2))
+					 (list proof
+					       (floor proof)
+					       (ceiling proof))
+					 #'(lambda (w p)
+					     (assoc w (cdr (assoc p *30.62-wine-gallons-and-proof-gallons-by-weight*))))
+					 nil
+					 nil))
+
+(defgeneric volume-by-weight-and-proof (weight proof &key type)
+  (:documentation
+   "Returns the actual percent proof provided by proof and temperature or
+NIL if the values fall outside of the known ranges.")
+  (:method :before (weight proof &key type)
+    (declare (ignore weight proof type))
+    (unless *30.62-wine-gallons-and-proof-gallons-by-weight*
+      (load-30.62-table-assoc)))
+  (:method ((weight unit) (proof unit) &key (type :wine-gallons))
+    (let* ((pf (convert-unit proof 'proof))
+	   (pounds (convert-unit weight 'pounds))
+	   (%gallons (let ((%gal (%volume-by-weight-and-proof pounds pf)))
+		       (cond ((eq type :wine-gallons) (second %gal))
+			     ((eq type :proof-gallons) (third %gal))
+			     (t (error "Unknown proof or wine gallon!"))))))
+      (unless (null %gallons)
+	(reduce-unit (list %gallons 'gallons)))))  
+  (:method ((weight list) proof &key (type :wine-gallons))
+    (volume-by-weight-and-proof (reduce-unit weight) proof :type type))
+  (:method (weight (proof list) &key (type :wine-gallons))
+    (volume-by-weight-and-proof weight (reduce-unit proof) :type type))
+  (:method ((weight number) proof &key (type :wine-gallons))
+    (volume-by-weight-and-proof (list weight 'pounds) proof :type type))
+  (:method (weight (proof number) &key (type :wine-gallons))
+    (volume-by-weight-and-proof weight (list proof 'proof) :type type)))
+
 ;;;; 30.63 Table 3, determining the # of proof gallons from the weight
 ;;;;    and proof of spirituous liquor
 ;;;; 30.64 Table 4, showing the fractional part of a gallon per pound

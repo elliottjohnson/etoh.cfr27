@@ -13,7 +13,10 @@
 (defclass site-configuration ()
   ((lazy-load-tables :initarg :lazy-load-tables
 		     :accessor lazy-load-tables-p
-		     :initform *site-configuration-lazy-load-tables*)))
+		     :initform *site-configuration-lazy-load-tables*)
+   (message-stream :initarg :message-stream
+		   :accessor message-stream
+		   :initform *standard-output*)))
 
 (defvar *default-site-configuration*
   (make-instance 'site-configuration)
@@ -24,5 +27,10 @@
 lazy loading large tables."
   (asdf/system::system-source-directory :etoh.cfr27))
 
-;; Configuration class
-()
+(defun message (format-string &rest format-args)
+  (let ((stream (message-stream *default-site-configuration*)))
+    (when stream
+      (apply #'format
+	     stream
+	     format-string
+	     format-args))))
