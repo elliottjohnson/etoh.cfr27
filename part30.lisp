@@ -57,7 +57,7 @@
 ;;;;    hydrometer at temperatures between zero and 100 degrees Fahrenheit.
 
 (defvar *30.61-true-percent-proof-table* nil
-  "Table 1, showing the true percent of proof spirit for any indication of the 
+  "Table 1, showing the true percent of proof spirit for any indication of the
 hydrometer at temperatures between zero and 100 degrees Fahrenheit.  The
 function TRUE-PERCENT-PROOF will lazy load this value.")
 
@@ -156,7 +156,7 @@ returned by table-function."
 (defvar *30.61-true-percent-proof-table-error-datum*
   "No table values for ~A-~A proof at ~A-~A fahrenheit"
   "If true and a string error datum, an error will be generated with restarts.")
-o
+
 (defgeneric true-percent-proof (proof temperature)
   (:documentation
    "Returns the actual percent proof provided by proof and temperature or
