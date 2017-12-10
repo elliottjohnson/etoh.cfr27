@@ -4,7 +4,7 @@
 
 (defparameter +ttb-website-url+ "http://www.ttb.gov")
 (defparameter *cfr27-version-timestamp*
-  (encode-timestamp 0 0 0 0 7 6 2017)
+  (encode-timestamp 0 0 0 0 7 12 2017)
   "A timestamp representing the latest version this software relates to.")
 
 (defvar *site-configuration-lazy-load-tables* t
