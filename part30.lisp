@@ -75,14 +75,19 @@ function TRUE-PERCENT-PROOF will lazy load this value.")
 					     (current-directory)))
 	     (read array)))))
 
-
 (defun load-30.61-table-array (&optional (force nil))
   (lazy-load-table *30.61-true-percent-proof-table*
 		   "part30.61.tbl1.array.lisp"
 		   force))
 
 ;; dimensions is a list of max array dimensions.
-(defun multi-dimensional-array-interpolation (arg1-list arg2-list table-function datum table-null)
+(defun multi-dimensional-array-interpolation (arg1-list
+					      arg2-list
+					      table-function
+					      datum
+					      table-null)
+  "Returns a value interpreted based upon distance from known values
+returned by table-function."
   (let ((return-value table-null))
     (destructuring-bind (arg1 arg1-floor arg1-ceiling)
 	arg1-list
@@ -91,18 +96,39 @@ function TRUE-PERCENT-PROOF will lazy load this value.")
 	(handler-case
 	    (if (and (= arg1 arg1-floor arg1-ceiling)
 		     (= arg2 arg2-floor arg2-ceiling))
-		(progn
-		  (setf return-value (funcall table-function arg1-floor arg2-floor)))
-		(let ((arg1-arg2-floor (funcall table-function arg1-floor arg2-floor))
-		      (arg1-ceiling (funcall table-function arg1-ceiling arg2-floor))
-		      (arg2-ceiling (funcall table-function arg1-floor arg2-ceiling)))
+		(setf return-value
+		      (funcall table-function
+			       arg1-floor
+			       arg2-floor))
+		(let ((arg1-arg2-table-floor
+		       (funcall table-function arg1-floor arg2-floor))
+		      (arg1-table-ceiling
+		       (funcall table-function arg1-ceiling arg2-floor))
+		      (arg2-table-ceiling
+		       (funcall table-function arg1-floor arg2-ceiling))
+		      (arg1-range (- arg1-ceiling arg1-floor))
+		      (arg2-range (- arg2-ceiling arg2-floor))
+		      (arg1-span (- arg1 arg1-floor))
+		      (arg2-span (- arg2 arg2-floor)))
 		  (unless (some #'(lambda (x) (equal table-null x))
-				(list arg1-arg2-floor arg1-ceiling arg2-ceiling))
-		    (let* ((diff-arg1 (- arg1-ceiling arg1-arg2-floor))
-			   (diff-arg2 (- arg2-ceiling arg1-arg2-floor))
-			   (arg1-contribution (* diff-arg1 (- arg1 arg1-floor)))
-			   (arg2-contribution (* diff-arg2 (- arg2 arg2-floor))))
-		      (setf return-value (+ arg1-arg2-floor arg1-contribution arg2-contribution))))))
+				(list arg1-arg2-table-floor
+				      arg1-table-ceiling
+				      arg2-table-ceiling))
+		    (let* ((diff-arg1 (- arg1-table-ceiling
+					 arg1-arg2-table-floor))
+			   (diff-arg2 (- arg2-table-ceiling
+					 arg1-arg2-table-floor))
+			   (percent-arg1 (if (zerop arg1-range)
+					     0
+					     (/ arg1-span arg1-range)))
+			   (percent-arg2 (if (zerop arg2-range)
+					     0
+					     (/ arg2-span arg2-range)))
+			   (arg1-contribution (* diff-arg1 percent-arg1))
+			   (arg2-contribution (* diff-arg2 percent-arg2)))
+		      (setf return-value (+ arg1-arg2-table-floor
+					    arg1-contribution
+					    arg2-contribution))))))
 	  (type-error ()
 	    (message "~%Invalid index reference (~A,~A), using table-null value: ~A."
 		     arg1 arg2 table-null)
@@ -115,21 +141,22 @@ function TRUE-PERCENT-PROOF will lazy load this value.")
     return-value))
 
 (defun %true-percent-proof (proof temperature)
-  (multi-dimensional-array-interpolation (list proof
-					       (floor proof)
-					       (ceiling proof))
-					 (list temperature
-					       (floor temperature)
-					       (ceiling temperature))
-					 #'(lambda (arg1 arg2)
-					     (aref *30.61-true-percent-proof-table* arg1 arg2))
-					 *30.61-true-percent-proof-table-error-datum*
-					 -1))
+  (multi-dimensional-array-interpolation
+   (list proof
+	 (floor proof)
+	 (ceiling proof))
+   (list temperature
+	 (floor temperature)
+	 (ceiling temperature))
+   #'(lambda (arg1 arg2)
+       (aref *30.61-true-percent-proof-table* arg1 (1- arg2)))
+   *30.61-true-percent-proof-table-error-datum*
+   -1))
 
 (defvar *30.61-true-percent-proof-table-error-datum*
   "No table values for ~A-~A proof at ~A-~A fahrenheit"
   "If true and a string error datum, an error will be generated with restarts.")
-
+o
 (defgeneric true-percent-proof (proof temperature)
   (:documentation
    "Returns the actual percent proof provided by proof and temperature or
@@ -153,7 +180,6 @@ NIL if the values fall outside of the known ranges.")
   (:method (proof (temperature number))
     (true-percent-proof proof (list temperature 'fahrenheit))))
 
-
 ;;;; 30.62 Table 2, wine gallons and proof gallons by weight.
 
 (defvar *30.62-wine-gallons-and-proof-gallons-by-weight* nil
@@ -165,16 +191,17 @@ NIL if the values fall outside of the known ranges.")
 		   force))
 
 (defun %volume-by-weight-and-proof (weight proof)
-  (multi-dimensional-array-interpolation (list weight ;; in 0.5 increments
-					       (/ (floor (* 2 weight) 1) 2)
-					       (/ (ceiling (* 2 weight) 1) 2))
-					 (list proof
-					       (floor proof)
-					       (ceiling proof))
-					 #'(lambda (w p)
-					     (assoc w (cdr (assoc p *30.62-wine-gallons-and-proof-gallons-by-weight*))))
-					 nil
-					 nil))
+  (multi-dimensional-array-interpolation
+   (list weight ;; in 0.5 increments
+	 (/ (floor (* 2 weight) 1) 2)
+	 (/ (ceiling (* 2 weight) 1) 2))
+   (list proof
+	 (floor proof)
+	 (ceiling proof))
+   #'(lambda (w p)
+       (assoc w (cdr (assoc p *30.62-wine-gallons-and-proof-gallons-by-weight*))))
+   nil
+   nil))
 
 (defgeneric volume-by-weight-and-proof (weight proof &key type)
   (:documentation
@@ -204,6 +231,82 @@ NIL if the values fall outside of the known ranges.")
 
 ;;;; 30.63 Table 3, determining the # of proof gallons from the weight
 ;;;;    and proof of spirituous liquor
+
+(defvar *30.63-proof-gallons-by-weight-and-proof* nil
+  "Table 3, Determination of the # of proof gallons from the weight
+and proof of spirituous liquor")
+
+(defun load-30.63-table-array (&optional force)
+  (lazy-load-table *30.63-proof-gallons-by-weight-and-proof*
+		   "part30.63.tbl3.array.lisp"
+		   force))
+
+(defun %30.63-pounds-to-funcall-index (function pounds)
+  (1- (cond ((>= 1000 pounds)
+	     (funcall function pounds 100))
+	    ((>= 10000 pounds)
+	     (+ 9 (funcall function pounds 1000)))
+	    ((>= 70000 pounds)
+	     (+ 18 (funcall function pounds 10000)))
+	    (t (error "pounds beyond range of table: ~A" pounds)))))
+
+(defun 30.63-pounds-to-floor-index (pounds)
+  (%30.63-pounds-to-funcall-index #'floor pounds))
+(defun 30.63-pounds-to-ceiling-index (pounds)
+  (%30.63-pounds-to-funcall-index #'ceiling pounds))
+
+(defun %30.63-pounds-to-funcall-pounds (function pounds)
+  (cond ((>= 1000 pounds)
+	 (* (funcall function pounds 100) 100))
+	((>= 10000 pounds)
+	 (* (funcall function pounds 1000) 1000))
+	((>= 70000 pounds)
+	 (* (funcall function pounds 10000) 10000))
+	(t (error "pounds beyond the range of table pounds: ~A" pounds))))
+
+(defun 30.63-pounds-to-floor-pounds (pounds)
+  (%30.63-pounds-to-funcall-pounds #'floor pounds))
+(defun 30.63-pounds-to-ceiling-pounds (pounds)
+  (%30.63-pounds-to-funcall-pounds #'ceiling pounds))
+
+(defun %proof-gallons-by-weight-and-proof (weight proof)
+  (multi-dimensional-array-interpolation
+   (list weight
+	 (30.63-pounds-to-floor-pounds weight)
+	 (30.63-pounds-to-ceiling-pounds weight))
+   (list proof
+	 (floor proof)
+	 (ceiling proof))
+   #'(lambda (w p)
+       (aref *30.63-proof-gallons-by-weight-and-proof*
+			(1- p)
+			(30.63-pounds-to-floor-index w)))
+   nil
+   -1))
+
+(defgeneric proof-gallons-by-weight-and-proof (weight proof)
+  (:documentation
+   "Returns the number of proof gallons by the provided
+WEIGHT and PROOF as units.  Returns nil otherwise.")
+  (:method :before (weight proof)
+    (declare (ignore weight proof))
+    (unless *30.63-proof-gallons-by-weight-and-proof*
+      (load-30.63-table-array)))
+  (:method ((weight unit) (proof unit))
+    (let* ((pf (convert-unit proof 'proof))
+	   (pounds (convert-unit weight 'pounds))
+	   (%pgs (%proof-gallons-by-weight-and-proof pounds pf)))
+      (unless (= -1 %pgs)
+	(reduce-unit (list %pgs 'gallons)))))  
+  (:method ((weight list) proof)
+    (proof-gallons-by-weight-and-proof (reduce-unit weight) proof))
+  (:method (weight (proof list))
+    (proof-gallons-by-weight-and-proof weight (reduce-unit proof)))
+  (:method ((weight number) proof)
+    (proof-gallons-by-weight-and-proof (list weight 'pounds) proof))
+  (:method (weight (proof number))
+    (proof-gallons-by-weight-and-proof weight (list proof 'proof))))
+
 ;;;; 30.64 Table 4, showing the fractional part of a gallon per pound
 ;;;;    at each percent and each tenth percent of proof of spirituous liquor
 ;;;; 30.65 Table 5, showing the weight per wine gallon (at 60 dF) and proof

@@ -3,7 +3,7 @@ etoh.cfr27: A library to interface with US Title 27 Subchapter A
 This code is based upon US Code of Federal Regulations 27, Subchapter A
 parts 1-39, which concerns regulations governing alcohol.
 
-The current reference is to the May 25th, 2017 version, so as
+The current reference is to the June 6th, 2017 version, so as
 modification to the code occurs there will be a need to update this
 library.  When using this software look to see if the latest
 definition is up to date.  This is stored in *cfr27-version-timestamp*
@@ -16,7 +16,7 @@ The concept behind this library is to provide the basic declaration of
 how alcohol is produced in the US as well as some higher level
 utilities, helper functions and classes as an API.
 
-Subchapter A is broken down into the following parts and this library
+Subchapter A is broken down into the following parts that this library
 aims to eventually include:
 
      	 1 - Basic permit requirements

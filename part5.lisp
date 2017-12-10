@@ -165,7 +165,7 @@ for the sale of distilled spirits at retail.")
    "Ethyl alcohol, hydrated oxide of ethyl, spirits of wine, whiskey, rum,
 brandy, gin, and other distilled spirits, including all dilutions and
 mixtures thereof, for non-industrial use.  The term 'distilled spirits'
-hall not include mixtures containing wine, bottled at 48 degrees of
+shall not include mixtures containing wine, bottled at 48 degrees of
 proof or less, if the mixture contains more than 50 percent wine on a
 proof gallon basis."))
 
@@ -225,7 +225,15 @@ who is a wholesale or retailer."))
 ;; 1.0d0
 ;; CFR27> (convert-unit ** 'shot)
 ;; 85.33486360957208d0
+
 ;;; "Proof" that 1 US proof-gallon is equal to 85.3 US proof-shots
+
+;; CFR27> (reduce-unit '((1 shot) (100 proof) pgs))
+;; #<UNIT 4.4359498622099745d-5 m^3>
+;; CFR27> (convert-unit * 'gallons)
+;; 0.011718539852307553d0
+;; CFR27> (* * 85.3)
+;; 0.9995914851639798d0
 
 ;; Season
 (defun season (timestamp)
