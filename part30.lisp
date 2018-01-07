@@ -309,6 +309,56 @@ WEIGHT and PROOF as units.  Returns nil otherwise.")
 
 ;;;; 30.64 Table 4, showing the fractional part of a gallon per pound
 ;;;;    at each percent and each tenth percent of proof of spirituous liquor
+
+(defvar *30.64-gallons-per-pound-table* nil
+  "Table No. 4, showing the fractional part of a gallon per pound at each percent and each tenth percent of proof of spirituous liquor.")
+
+(defun load-30.64-table-array (&optional (force nil))
+  (lazy-load-table *30.64-gallons-per-pound-table*
+		   "part30.64.tbl4.array.lisp"
+		   force))
+
+(defun %gallons-per-pound (proof column-number)
+  (assert (and (or (= column-number 1)
+		   (= column-number 2))
+	       (<= 1 proof 200)))
+  (multi-dimensional-array-interpolation
+   (list proof
+	 (floor proof)
+	 (ceiling proof))
+   (list column-number
+	 column-number
+	 column-number)
+   #'(lambda (p c)
+       (aref *30.64-gallons-per-pound-table* p c))
+   nil
+   nil))
+
+(defun column-id (column-keyword)
+  (ecase column-keyword
+    (:wine 1)
+    (:proof 2)))
+
+(defgeneric gallons-per-pound (proof column)
+  (:documentation
+   "Returns the gallons per pound ratio for a given
+concentration (PROOF,etc).  COLUMN can be one of
+:WINE or :PROOF.")
+  (:method :before (proof column)
+    (declare (ignore proof column))
+    (unless *30.64-gallons-per-pound-table*
+      (load-30.64-table-array)))
+  (:method ((proof unit) column)
+    (let* ((pf (convert-unit proof 'proof))
+	   (ratio (%gallons-per-pound (- (* 10 pf) 10)
+				      (column-id column))))
+      (when ratio
+	(reduce-unit (list ratio '(/ gallons pound))))))
+  (:method ((proof list) column)
+    (gallons-per-pound (reduce-unit proof) column))
+  (:method ((proof number) column)
+    (gallons-per-pound (list proof 'proof) column)))
+
 ;;;; 30.65 Table 5, showing the weight per wine gallon (at 60 dF) and proof
 ;;;;    gallon at each percent of proof of spirituous liquor.
 ;;;; 30.66 Table 6, showing respective volumes of alcohol and water and the
