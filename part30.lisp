@@ -318,14 +318,14 @@ WEIGHT and PROOF as units.  Returns nil otherwise.")
 		   "part30.64.tbl4.array.lisp"
 		   force))
 
-(defun %gallons-per-pound (proof column-number)
+(defun %gallons-per-pound (proof-ref column-number)
   (assert (and (or (= column-number 1)
 		   (= column-number 2))
-	       (<= 1 proof 200)))
+	       (<= 0 proof-ref 1990)))
   (multi-dimensional-array-interpolation
-   (list proof
-	 (floor proof)
-	 (ceiling proof))
+   (list proof-ref
+	 (floor proof-ref)
+	 (ceiling proof-ref))
    (list column-number
 	 column-number
 	 column-number)
