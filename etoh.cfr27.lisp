@@ -10,13 +10,20 @@
 (defvar *site-configuration-lazy-load-tables* t
   "This variable holds a boolean value that is referenced when creating new site-configuration objects.")
 
+(defvar *site-configuration-table-column-type* :wine
+  "The default type of value to pull from tables, typeically :WINE,
+but also can be :proof, for proof-gallons as default return values.")
+
 (defclass site-configuration ()
   ((lazy-load-tables :initarg :lazy-load-tables
 		     :accessor lazy-load-tables-p
 		     :initform *site-configuration-lazy-load-tables*)
    (message-stream :initarg :message-stream
 		   :accessor message-stream
-		   :initform *standard-output*)))
+		   :initform *standard-output*)
+   (table-column-type :initarg :table-column-type
+		      :accessor table-column-type
+		      :initform *site-configuration-table-column-type*)))
 
 (defvar *default-site-configuration*
   (make-instance 'site-configuration)
