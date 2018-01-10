@@ -86,8 +86,10 @@ function TRUE-PERCENT-PROOF will lazy load this value.")
 					      table-function
 					      datum
 					      table-null)
-  "Returns a value interpreted based upon distance from known values
-returned by table-function."
+  "Reference table values using table-function and interpolate the results.  
+ARG1-LIST and ARG2-LIST are of the form:
+     (actual-value floor-value ceiling-value)
+DATUM is an error message string that should accept 4 string arguments."
   (let ((return-value table-null))
     (destructuring-bind (arg1 arg1-floor arg1-ceiling)
 	arg1-list
@@ -203,31 +205,36 @@ NIL if the values fall outside of the known ranges.")
    nil
    nil))
 
-(defgeneric volume-by-weight-and-proof (weight proof &key type)
+(defun default-column-type (&optional (config *default-site-configuration*))
+  (table-column-type config))
+
+(defgeneric volume-by-weight-and-proof (weight proof &key column)
   (:documentation
    "Returns the actual percent proof provided by proof and temperature or
 NIL if the values fall outside of the known ranges.")
-  (:method :before (weight proof &key type)
-    (declare (ignore weight proof type))
+  (:method :before (weight proof &key column)
+    (declare (ignore weight proof column))
     (unless *30.62-wine-gallons-and-proof-gallons-by-weight*
       (load-30.62-table-assoc)))
-  (:method ((weight unit) (proof unit) &key (type :wine-gallons))
+  (:method ((weight unit) (proof unit) &key (column (default-column-type)))
     (let* ((pf (convert-unit proof 'proof))
 	   (pounds (convert-unit weight 'pounds))
 	   (%gallons (let ((%gal (%volume-by-weight-and-proof pounds pf)))
-		       (cond ((eq type :wine-gallons) (second %gal))
-			     ((eq type :proof-gallons) (third %gal))
+		       (cond ((eq column :wine) (second %gal))
+			     ((eq column :proof) (third %gal))
 			     (t (error "Unknown proof or wine gallon!"))))))
       (unless (null %gallons)
 	(reduce-unit (list %gallons 'gallons)))))  
-  (:method ((weight list) proof &key (type :wine-gallons))
-    (volume-by-weight-and-proof (reduce-unit weight) proof :type type))
-  (:method (weight (proof list) &key (type :wine-gallons))
-    (volume-by-weight-and-proof weight (reduce-unit proof) :type type))
-  (:method ((weight number) proof &key (type :wine-gallons))
-    (volume-by-weight-and-proof (list weight 'pounds) proof :type type))
-  (:method (weight (proof number) &key (type :wine-gallons))
-    (volume-by-weight-and-proof weight (list proof 'proof) :type type)))
+  (:method ((weight list) proof &key (column (default-column-type)))
+    (volume-by-weight-and-proof (reduce-unit weight) proof :column column))
+  (:method (weight (proof list) &key (column (default-column-type)))
+    (volume-by-weight-and-proof weight (reduce-unit proof) :column column))
+  (:method ((weight number) proof &key (column (default-column-type)))
+    (volume-by-weight-and-proof (reduce-unit (list weight 'pounds)) proof
+				:column column))
+  (:method (weight (proof number) &key (column (default-column-type)))
+    (volume-by-weight-and-proof weight (reduce-unit (list proof 'proof))
+				:column column)))
 
 ;;;; 30.63 Table 3, determining the # of proof gallons from the weight
 ;;;;    and proof of spirituous liquor
@@ -302,11 +309,17 @@ WEIGHT and PROOF as units.  Returns nil otherwise.")
     (proof-gallons-by-weight-and-proof (reduce-unit weight) proof))
   (:method (weight (proof list))
     (proof-gallons-by-weight-and-proof weight (reduce-unit proof)))
+  (:method (weight (proof symbol))
+    (proof-gallons-by-weight-and-proof weight (reduce-unit proof)))
   (:method ((weight number) proof)
-    (proof-gallons-by-weight-and-proof (list weight 'pounds) proof))
+    (proof-gallons-by-weight-and-proof (reduce-unit (list weight 'pounds))
+				       proof))
   (:method (weight (proof number))
-    (proof-gallons-by-weight-and-proof weight (list proof 'proof))))
+    (proof-gallons-by-weight-and-proof weight
+				       (reduce-unit (list proof 'proof)))))
 
+(defvar pgs/proof-lbs 'alias "Fn alias for proof-gallons-by-weight-and-proof")
+(setf (symbol-function pgs/proof-lbs) #'proof-gallons-by-weight-and-proof)
 ;;;; 30.64 Table 4, showing the fractional part of a gallon per pound
 ;;;;    at each percent and each tenth percent of proof of spirituous liquor
 
@@ -337,9 +350,10 @@ WEIGHT and PROOF as units.  Returns nil otherwise.")
 (defun column-id (column-keyword)
   (ecase column-keyword
     (:wine 1)
-    (:proof 2)))
+    (:proof 2)
+    ((or 1 2) column-keyword)))
 
-(defgeneric gallons-per-pound (proof column)
+(defgeneric volume-per-mass-ratio (proof column)
   (:documentation
    "Returns the gallons per pound ratio for a given
 concentration (PROOF,etc).  COLUMN can be one of
@@ -350,17 +364,65 @@ concentration (PROOF,etc).  COLUMN can be one of
       (load-30.64-table-array)))
   (:method ((proof unit) column)
     (let* ((pf (convert-unit proof 'proof))
-	   (ratio (%gallons-per-pound (- (* 10 pf) 10)
-				      (column-id column))))
+	   (ratio (%gallons-per-pound (- (* 10 pf) 10) (column-id column))))
       (when ratio
 	(reduce-unit (list ratio '(/ gallons pound))))))
   (:method ((proof list) column)
-    (gallons-per-pound (reduce-unit proof) column))
+    (volume-per-mass-ratio (reduce-unit proof) column))
+  (:method ((proof symbol) column)
+    (volume-per-mass-ratio (reduce-unit proof) column))
   (:method ((proof number) column)
-    (gallons-per-pound (list proof 'proof) column)))
+    (volume-per-mass-ratio (reduce-unit `(,proof proof)) column)))
+
+(defvar v/m-ratio 'alias "Fn alias for volume-per-mass-ratio")
+(setf (symbol-function 'v/m-ratio) #'volume-per-mass-ratio)
 
 ;;;; 30.65 Table 5, showing the weight per wine gallon (at 60 dF) and proof
 ;;;;    gallon at each percent of proof of spirituous liquor.
+
+(defvar *30.65-pounds-per-gallon-table* nil
+  "Table No. 5, showing the weight per wine gallon (at 60 F) and proof gallon at each percent of proof of spirituous liquor.")
+
+(defun load-30.65-table-array (&optional (force nil))
+  (lazy-load-table *30.65-pounds-per-gallon-table*
+		   "part30.65.tbl5.array.lisp"
+		   force))
+
+(defun %pounds-per-gallon (proof-index column-number)
+  (assert (and (or (= column-number 1)
+		   (= column-number 2))
+	       (<= 0 proof-index 199)))
+  (multi-dimensional-array-interpolation
+   (list proof-index (floor proof-index) (ceiling proof-index))
+   (list column-number column-number column-number)
+   #'(lambda (p c)
+       (aref *30.65-pounds-per-gallon-table* p c))
+   nil
+   -1))
+
+(defgeneric mass-per-volume (proof column)
+  (:documentation
+   "Returns the mass/volume for a given concentration (PROOF, etc).
+COLUMN can be one of :WINE or :PROOF.")
+  (:method :before (proof column)
+    (declare (ignore proof column))
+    (unless *30.65-pounds-per-gallon-table*
+      (load-30.65-table-array)))
+  (:method ((proof unit) column)
+    (let* ((proof (convert-unit proof 'proof))
+	   (w/v (%pounds-per-gallon (- proof 1) (column-id column))))
+      (when w/v
+	(reduce-unit (list w/v '(/ pounds gallon))))))
+  (:method ((proof list) column)
+    (mass-per-volume (reduce-unit proof) column))
+  (:method ((proof symbol) column)
+    (mass-per-volume (reduce-unit proof) column))
+  (:method ((proof number) column)
+    (mass-per-volume (reduce-unit `(,proof proof)) column)))
+
+(defvar m/v 'alias "Fn alias for mass-per-volume.")
+(setf (symbol-function 'm/v) #'mass-per-volume)
+
 ;;;; 30.66 Table 6, showing respective volumes of alcohol and water and the
 ;;;;    specific gravity in both air and vacuum of spirituous liquor.
 ;;;; 30.67 Table 7, for correction of volume of spirituous liquors to 60 dF.
