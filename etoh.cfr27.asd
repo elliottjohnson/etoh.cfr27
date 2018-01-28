@@ -4,7 +4,12 @@
   :description "etoh.cfr27: A library to interface with US Title 27"
   :author "Elliott Johnson <elliott@elliottjohnson.net>"
   :license "LLGPL"
-  :depends-on ("unit-formulas" "etoh.units" "local-time" "prove")
+  :depends-on ("unit-formulas"
+	       "etoh.units"
+	       "local-time"
+	       "prove"
+	       "drakma"
+	       "xmls")
   :serial t
   :components ((:file "package")
                (:file "etoh.cfr27")
